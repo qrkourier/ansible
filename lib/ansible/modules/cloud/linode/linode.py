@@ -313,7 +313,7 @@ def getInstanceDetails(api, server):
                 'private': []}
 
     # Populate with ips
-    for ip in api.linode_ip_list(LinodeId=server['LINODEID']):
+    for ip in api.linode.ip.list(LinodeId=server['LINODEID']):
         if ip['ISPUBLIC'] and 'ipv4' not in instance:
             instance['ipv4'] = ip['IPADDRESS']
             instance['fqdn'] = ip['RDNS_NAME']
@@ -344,12 +344,12 @@ def linodeServers(module, api, state, name,
     if linode_id:
         # For the moment we only consider linode_id as criteria for match
         # Later we can use more (size, name, etc.) and update existing
-        servers = api.linode_list(LinodeId=linode_id)
+        servers = api.linode.list(LinodeId=linode_id)
         # Attempt to fetch details about disks and configs only if servers are
         # found with linode_id
         if servers:
-            disks = api.linode_disk_list(LinodeId=linode_id)
-            configs = api.linode_config_list(LinodeId=linode_id)
+            disks = api.linode.disk.list(LinodeId=linode_id)
+            configs = api.linode.config.list(LinodeId=linode_id)
 
     # Act on the state
     if state in ('active', 'present', 'started'):
@@ -372,23 +372,23 @@ def linodeServers(module, api, state, name,
             used_disk_space = 0 if additional_disks is None else sum(disk['Size'] for disk in additional_disks)
 
             try:
-                res = api.linode_create(DatacenterID=datacenter, PlanID=plan,
+                res = api.linode.create(DatacenterID=datacenter, PlanID=plan,
                                         PaymentTerm=payment_term)
                 linode_id = res['LinodeID']
                 # Update linode Label to match name
-                api.linode_update(LinodeId=linode_id, Label='%s_%s' % (linode_id, name))
+                api.linode.update(LinodeId=linode_id, Label='%s_%s' % (linode_id, name))
                 # Update Linode with Ansible configuration options
                 api.linode_update(LinodeId=linode_id,
                         LPM_DISPLAYGROUP=displaygroup, WATCHDOG=watchdog, **kwargs)
                 # Save server
-                servers = api.linode_list(LinodeId=linode_id)
+                servers = api.linode.list(LinodeId=linode_id)
             except Exception as e:
                 module.fail_json(msg = '%s' % e.value[0]['ERRORMESSAGE'])
 
         #Add private IP to Linode
         if private_ip:
             try:
-                res = api.linode_ip_addprivate(LinodeID=linode_id)
+                res = api.linode.ip.addprivate(LinodeID=linode_id)
             except Exception as e:
                 module.fail_json(msg = '%s' % e.value[0]['ERRORMESSAGE'])
 
@@ -408,20 +408,18 @@ def linodeServers(module, api, state, name,
                 size = servers[0]['TOTALHD'] - used_disk_space - swap
 
                 if ssh_pub_key:
-                    res = api.linode_disk_createfromdistribution(
+                    res = api.linode.disk.createfromdistribution(
                         LinodeId=linode_id, DistributionID=distribution,
                         rootPass=password, rootSSHKey=ssh_pub_key,
                         Label='%s data disk (lid: %s)' % (name, linode_id),
                         Size=size)
                 else:
-                    res = api.linode_disk_createfromdistribution(
-                        LinodeId=linode_id, DistributionID=distribution,
-                        rootPass=password,
-                        Label='%s data disk (lid: %s)' % (name, linode_id),
-                        Size=size)
+                    res = api.linode.disk.createfromdistribution(
+                        LinodeId=linode_id, DistributionID=distribution, rootPass=password,
+                        Label='%s data disk (lid: %s)' % (name, linode_id), Size=size)
                 jobs.append(res['JobID'])
                 # Create SWAP disk
-                res = api.linode_disk_create(LinodeId=linode_id, Type='swap',
+                res = api.linode.disk.create(LinodeId=linode_id, Type='swap',
                                              Label='%s swap disk (lid: %s)' % (name, linode_id),
                                              Size=swap)
                 # Create individually listed disks at specified size
@@ -430,7 +428,7 @@ def linodeServers(module, api, state, name,
                         # If a disk Type is not passed in, default to ext4
                         if disk.get('Type') is None:
                             disk['Type'] = 'ext4'
-                        res = api.linode_disk_create(LinodeID=linode_id, Label=disk['Label'], Size=disk['Size'], Type=disk['Type'])
+                        res = api.linode.disk.create(LinodeID=linode_id, Label=disk['Label'], Size=disk['Size'], Type=disk['Type'])
 
                 jobs.append(res['JobID'])
             except Exception as e:
@@ -443,7 +441,7 @@ def linodeServers(module, api, state, name,
                     module.fail_json(msg='%s is required for %s state' % (arg, state))
 
             # Check architecture
-            for distrib in api.avail_distributions():
+            for distrib in api.avail.distributions():
                 if distrib['DISTRIBUTIONID'] != distribution:
                     continue
                 arch = '32'
@@ -461,7 +459,7 @@ def linodeServers(module, api, state, name,
 
             # Get disk list
             disks_id = []
-            for disk in api.linode_disk_list(LinodeId=linode_id):
+            for disk in api.linode.disk.list(LinodeId=linode_id):
                 if disk['TYPE'] == 'ext3':
                     disks_id.insert(0, str(disk['DISKID']))
                     continue
@@ -474,19 +472,19 @@ def linodeServers(module, api, state, name,
             # Create config
             new_server = True
             try:
-                api.linode_config_create(LinodeId=linode_id, KernelId=kernel_id,
+                api.linode.config.create(LinodeId=linode_id, KernelId=kernel_id,
                                          Disklist=disks_list, Label='%s config' % name)
-                configs = api.linode_config_list(LinodeId=linode_id)
+                configs = api.linode.config.list(LinodeId=linode_id)
             except Exception as e:
                 module.fail_json(msg = '%s' % e.value[0]['ERRORMESSAGE'])
 
         # Start / Ensure servers are running
         for server in servers:
             # Refresh server state
-            server = api.linode_list(LinodeId=server['LINODEID'])[0]
+            server = api.linode.list(LinodeId=server['LINODEID'])[0]
             # Ensure existing servers are up and running, boot if necessary
             if server['STATUS'] != 1:
-                res = api.linode_boot(LinodeId=linode_id)
+                res = api.linode.boot(LinodeId=linode_id)
                 jobs.append(res['JobID'])
                 changed = True
 
@@ -494,7 +492,7 @@ def linodeServers(module, api, state, name,
             wait_timeout = time.time() + wait_timeout
             while wait and wait_timeout > time.time():
                 # refresh the server details
-                server = api.linode_list(LinodeId=server['LINODEID'])[0]
+                server = api.linode.list(LinodeId=server['LINODEID'])[0]
                 # status:
                 #  -2: Boot failed
                 #  1: Running
@@ -506,7 +504,7 @@ def linodeServers(module, api, state, name,
                 module.fail_json(msg = 'Timeout waiting on %s (lid: %s)' %
                                  (server['LABEL'], server['LINODEID']))
             # Get a fresh copy of the server details
-            server = api.linode_list(LinodeId=server['LINODEID'])[0]
+            server = api.linode.list(LinodeId=server['LINODEID'])[0]
             if server['STATUS'] == -2:
                 module.fail_json(msg = '%s (lid: %s) failed to boot' %
                                  (server['LABEL'], server['LINODEID']))
@@ -536,7 +534,7 @@ def linodeServers(module, api, state, name,
             instance = getInstanceDetails(api, server)
             if server['STATUS'] != 2:
                 try:
-                    res = api.linode_shutdown(LinodeId=linode_id)
+                    res = api.linode.shutdown(LinodeId=linode_id)
                 except Exception as e:
                     module.fail_json(msg = '%s' % e.value[0]['ERRORMESSAGE'])
                 instance['status'] = 'Stopping'
@@ -555,7 +553,7 @@ def linodeServers(module, api, state, name,
         for server in servers:
             instance = getInstanceDetails(api, server)
             try:
-                res = api.linode_reboot(LinodeId=server['LINODEID'])
+                res = api.linode.reboot(LinodeId=server['LINODEID'])
             except Exception as e:
                 module.fail_json(msg = '%s' % e.value[0]['ERRORMESSAGE'])
             instance['status'] = 'Restarting'
@@ -566,7 +564,7 @@ def linodeServers(module, api, state, name,
         for server in servers:
             instance = getInstanceDetails(api, server)
             try:
-                api.linode_delete(LinodeId=server['LINODEID'], skipChecks=True)
+                api.linode.delete(LinodeId=server['LINODEID'], skipChecks=True)
             except Exception as e:
                 module.fail_json(msg = '%s' % e.value[0]['ERRORMESSAGE'])
             instance['status'] = 'Deleting'
@@ -677,7 +675,7 @@ def main():
     # setup the auth
     try:
         api = linode_api.Api(api_key)
-        api.test_echo()
+        api.test.echo()
     except Exception as e:
         module.fail_json(msg = '%s' % e.value[0]['ERRORMESSAGE'])
 
